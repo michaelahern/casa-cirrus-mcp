@@ -9,5 +9,9 @@ export class ModelContextProtocolSecretsStack extends cdk.Stack {
         new secretsmanager.Secret(this, 'CloudflareTunnelToken', {
             secretName: 'casa-cirrus-mcp/cloudflare/tunnel-token'
         });
+
+        new secretsmanager.Secret(this, 'UnifiSiteManagerApiKey', {
+            secretName: 'casa-cirrus-mcp/unifi/sitemanager-api-key'
+        });
     }
 }

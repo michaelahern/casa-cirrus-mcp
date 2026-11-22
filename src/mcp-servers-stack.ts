@@ -1,17 +1,17 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-// import * as ecs from 'aws-cdk-lib/aws-ecs';
-// import * as iam from 'aws-cdk-lib/aws-iam';
-// import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 
 export class ModelContextProtocolServersStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
 
-        new ec2.Vpc(this, 'VPC', {
+        const vpc = new ec2.Vpc(this, 'VPC', {
             ipProtocol: ec2.IpProtocol.DUAL_STACK,
             maxAzs: 3,
+            natGateways: 2,
             subnetConfiguration: [{
                 cidrMask: 24,
                 name: 'Public',
@@ -23,107 +23,60 @@ export class ModelContextProtocolServersStack extends cdk.Stack {
             }]
         });
 
-        // new secretsmanager.Secret(this, 'AuthKeySecret', {
-        //     secretName: 'tailscale/casa-cirrus-auth-key',
-        //     replicaRegions: [
-        //         { region: 'us-east-1' },
-        //         { region: 'us-west-2' }
-        //     ]
-        // });
+        const mcpCluster = new ecs.Cluster(this, 'Cluster', {
+            vpc: vpc,
+            containerInsightsV2: ecs.ContainerInsights.ENHANCED
+        });
 
-        // const ecsCluster = new ecs.Cluster(this, 'Cluster', {
-        //     vpc: vpc,
-        //     containerInsightsV2: ecs.ContainerInsights.ENHANCED
-        // });
+        const cloudflareTaskDefinition = new ecs.FargateTaskDefinition(this, 'CloudflareTunnelTaskDef', {
+            cpu: 512,
+            memoryLimitMiB: 1024,
+            runtimePlatform: {
+                cpuArchitecture: ecs.CpuArchitecture.ARM64,
+                operatingSystemFamily: ecs.OperatingSystemFamily.LINUX
+            }
+        });
 
-        // const ecsTaskDefinition = new ecs.FargateTaskDefinition(this, 'TailscaleTask', {
-        //     cpu: 512,
-        //     memoryLimitMiB: 1024,
-        //     runtimePlatform: {
-        //         cpuArchitecture: ecs.CpuArchitecture.ARM64,
-        //         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX
-        //     }
-        // });
+        cloudflareTaskDefinition.addContainer('CloudflareTunnel', {
+            image: ecs.ContainerImage.fromRegistry('cloudflare/cloudflared:latest'),
+            command: ['tunnel', '--no-autoupdate', '--metrics', '127.0.0.1:20241', 'run'],
+            secrets: {
+                TUNNEL_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(this, 'CloudflareTunnelToken', 'casa-cirrus-mcp/cloudflare/tunnel-token'))
+            },
+            essential: true,
+            healthCheck: {
+                command: ['CMD', 'cloudflared', 'tunnel', '--metrics', '127.0.0.1:20241', 'ready'],
+                interval: cdk.Duration.seconds(10),
+                startPeriod: cdk.Duration.seconds(30),
+                timeout: cdk.Duration.seconds(5)
+            },
+            logging: ecs.LogDrivers.awsLogs({
+                streamPrefix: 'ecs',
+                logRetention: cdk.aws_logs.RetentionDays.ONE_MONTH,
+                mode: ecs.AwsLogDriverMode.NON_BLOCKING
+            }),
+            systemControls: [{
+                namespace: 'net.ipv4.ping_group_range',
+                value: '0 65534'
+            }]
+        });
 
-        // const tailscale = ecsTaskDefinition.addContainer('Tailscale', {
-        //     image: ecs.ContainerImage.fromRegistry('ghcr.io/tailscale/tailscale:latest'),
-        //     environment: {
-        //         TS_ENABLE_HEALTH_CHECK: 'true',
-        //         TS_EXTRA_ARGS: '--advertise-exit-node --advertise-tags=tag:casa-cirrus',
-        //         TS_HOSTNAME: `casa-cirrus-exit-${this.region}`
-        //     },
-        //     secrets: {
-        //         TS_AUTH_KEY: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(this, 'TailscaleAuthKey', 'tailscale/casa-cirrus-auth-key'))
-        //     },
-        //     essential: true,
-        //     healthCheck: {
-        //         command: [
-        //             'CMD-SHELL',
-        //             'wget --spider -q http://127.0.0.1:9002/healthz'
-        //         ],
-        //         interval: cdk.Duration.seconds(30),
-        //         startPeriod: cdk.Duration.seconds(30),
-        //         timeout: cdk.Duration.seconds(5)
-        //     },
-        //     logging: ecs.LogDrivers.awsLogs({
-        //         streamPrefix: 'ecs',
-        //         logRetention: cdk.aws_logs.RetentionDays.ONE_MONTH,
-        //         mode: ecs.AwsLogDriverMode.NON_BLOCKING
-        //     }),
-        //     portMappings: [{
-        //         containerPort: 9002,
-        //         hostPort: 9002,
-        //         protocol: ecs.Protocol.TCP
-        //     }],
-        //     enableRestartPolicy: true,
-        //     restartAttemptPeriod: cdk.Duration.minutes(5)
-        // });
+        const cloudflareSecurityGroup = new ec2.SecurityGroup(this, 'CloudflareTunnelSecurityGroup', {
+            vpc,
+            allowAllOutbound: true,
+            allowAllIpv6Outbound: true
+        });
 
-        // const cwagent = ecsTaskDefinition.addContainer('cwagent', {
-        //     image: ecs.ContainerImage.fromRegistry('public.ecr.aws/cloudwatch-agent/cloudwatch-agent:latest'),
-        //     essential: false,
-        //     environment: { CW_CONFIG_CONTENT: JSON.stringify({ opentelemetry: { collect: { otlp: {} } } }) },
-        //     logging: ecs.LogDrivers.awsLogs({
-        //         streamPrefix: 'cwagent',
-        //         logRetention: cdk.aws_logs.RetentionDays.ONE_MONTH,
-        //         mode: ecs.AwsLogDriverMode.NON_BLOCKING
-        //     })
-        // });
-
-        // tailscale.addContainerDependencies({
-        //     container: cwagent,
-        //     condition: ecs.ContainerDependencyCondition.START
-        // });
-
-        // if (ecsTaskDefinition.executionRole) {
-        //     ecsTaskDefinition.executionRole.addManagedPolicy(
-        //         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2ContainerRegistryReadOnly')
-        //     );
-        // }
-
-        // if (ecsTaskDefinition.taskRole) {
-        //     ecsTaskDefinition.taskRole.addManagedPolicy(
-        //         iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy')
-        //     );
-        //     ecsTaskDefinition.taskRole.addManagedPolicy(
-        //         iam.ManagedPolicy.fromAwsManagedPolicyName('AWSXRayDaemonWriteAccess')
-        //     );
-        // }
-
-        // const ecsService = new ecs.FargateService(this, 'TailscaleService', {
-        //     cluster: ecsCluster,
-        //     desiredCount: 1,
-        //     maxHealthyPercent: 100,
-        //     minHealthyPercent: 0,
-        //     healthCheckGracePeriod: cdk.Duration.minutes(1),
-        //     circuitBreaker: {
-        //         enable: true
-        //     },
-        //     taskDefinition: ecsTaskDefinition,
-        //     assignPublicIp: true
-        // });
-
-        // ecsService.connections.allowInternally(ec2.Port.tcp(9002));
-        // ecsService.connections.allowToAnyIpv4(ec2.Port.allTraffic());
+        new ecs.FargateService(this, 'CloudflareTunnelService', {
+            cluster: mcpCluster,
+            desiredCount: 2,
+            securityGroups: [cloudflareSecurityGroup],
+            maxHealthyPercent: 200,
+            minHealthyPercent: 50,
+            circuitBreaker: {
+                enable: true
+            },
+            taskDefinition: cloudflareTaskDefinition
+        });
     }
 }

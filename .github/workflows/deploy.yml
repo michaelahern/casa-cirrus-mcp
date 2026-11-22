@@ -27,7 +27,7 @@ jobs:
         env:
           TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
   deploy-servers:
-    needs: [ deploy-auth ]
+    needs: [ deploy-secrets ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

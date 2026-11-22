@@ -1,0 +1,43 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: ${{ github.run_id }}
+          aws-region: us-east-2
+      - run: npm ci
+      - run: npm run cdk deploy ModelContextProtocolSecrets
+      - run: aws secretsmanager put-secret-value --secret-id casa-cirrus-mcp/cloudflare/tunnel-token --secret-string "$TUNNEL_TOKEN"
+        env:
+          TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+  deploy-servers:
+    needs: [ deploy-auth ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: ${{ github.run_id }}
+          aws-region: us-east-2
+      - run: npm ci
+      - run: npm run cdk deploy ModelContextProtocolServers

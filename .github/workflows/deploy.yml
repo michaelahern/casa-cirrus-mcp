@@ -26,6 +26,9 @@ jobs:
       - run: aws secretsmanager put-secret-value --secret-id casa-cirrus-mcp/cloudflare/tunnel-token --secret-string "$TUNNEL_TOKEN"
         env:
           TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+      - run: aws secretsmanager put-secret-value --secret-id casa-cirrus-mcp/unifi/sitemanager-api-key --secret-string "$UNIFI_SITEMANAGER_API_KEY"
+        env:
+          UNIFI_SITEMANAGER_API_KEY: ${{ secrets.UNIFI_SITEMANAGER_API_KEY }}
   deploy-servers:
     needs: [ deploy-secrets ]
     runs-on: ubuntu-latest

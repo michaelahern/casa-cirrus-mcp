@@ -146,6 +146,114 @@ export class ModelContextProtocolServersStack extends cdk.Stack {
         });
 
         // --------------------------------
+        // UniFi Network MCP
+        // --------------------------------
+
+        const unifiNetworkTaskDefinition = new ecs.FargateTaskDefinition(this, 'UnifiNetwork:TaskDef', {
+            cpu: 512,
+            memoryLimitMiB: 1024,
+            runtimePlatform: {
+                cpuArchitecture: ecs.CpuArchitecture.ARM64,
+                operatingSystemFamily: ecs.OperatingSystemFamily.LINUX
+            }
+        });
+
+        unifiNetworkTaskDefinition.addContainer('UnifiNetwork', {
+            image: ecs.ContainerImage.fromRegistry('ghcr.io/sirkirby/unifi-network-mcp:latest'),
+            environment: {
+                UNIFI_MCP_HTTP_ENABLED: 'true',
+                UNIFI_MCP_HTTP_TRANSPORT: 'streamable-http',
+                UNIFI_MCP_HOST: '0.0.0.0',
+                UNIFI_MCP_PORT: '3000',
+                UNIFI_MCP_ENABLE_DNS_REBINDING_PROTECTION: 'false'
+            },
+            secrets: {
+                UNIFI_NETWORK_HOST: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(this, 'UnifiNetwork:Host', 'casa-cirrus-mcp/unifi/network-host')),
+                UNIFI_NETWORK_USERNAME: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(this, 'UnifiNetwork:Username', 'casa-cirrus-mcp/unifi/network-username')),
+                UNIFI_NETWORK_PASSWORD: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(this, 'UnifiNetwork:Password', 'casa-cirrus-mcp/unifi/network-password'))
+            },
+            essential: true,
+            logging: ecs.LogDrivers.awsLogs({
+                streamPrefix: 'ecs',
+                logRetention: cdk.aws_logs.RetentionDays.ONE_MONTH,
+                mode: ecs.AwsLogDriverMode.NON_BLOCKING
+            }),
+            portMappings: [{
+                containerPort: 3000,
+                protocol: ecs.Protocol.TCP,
+                name: 'mcp',
+                appProtocol: ecs.AppProtocol.http
+            }]
+        });
+
+        const unifiNetworkTargetGroup = new vpclattice.CfnTargetGroup(this, 'UnifiNetwork:LatticeTargetGroup', {
+            type: 'IP',
+            name: 'casa-cirrus-mcp-unifi-network',
+            config: {
+                port: 3000,
+                protocol: 'HTTP',
+                protocolVersion: 'HTTP1',
+                ipAddressType: 'IPV4',
+                vpcIdentifier: vpc.vpcId,
+                healthCheck: {
+                    enabled: true,
+                    path: '/mcp',
+                    protocol: 'HTTP',
+                    protocolVersion: 'HTTP1',
+                    matcher: {
+                        httpCode: '200,400'
+                    }
+                }
+            }
+        });
+
+        const unifiNetworkFargateService = new ecs.FargateService(this, 'UnifiNetwork:FargateService', {
+            cluster: mcpCluster,
+            desiredCount: 1,
+            securityGroups: [sgAllowAllOutbound, sgAllowVpcLatticeInbound],
+            maxHealthyPercent: 100,
+            minHealthyPercent: 0,
+            circuitBreaker: {
+                enable: true
+            },
+            taskDefinition: unifiNetworkTaskDefinition
+        });
+
+        (unifiNetworkFargateService.node.defaultChild as ecs.CfnService).vpcLatticeConfigurations = [
+            {
+                portName: 'mcp',
+                roleArn: ecsInfraRoleForVpcLattice.roleArn,
+                targetGroupArn: unifiNetworkTargetGroup.attrArn
+            }
+        ];
+
+        const unifiNetworkLatticeService = new vpclattice.CfnService(this, 'UnifiNetwork:LatticeService', {
+            name: 'casa-cirrus-mcp-unifi-network',
+            authType: 'NONE',
+            customDomainName: 'unifi-network.mcp.us-east-2.aws.cirrus.casa'
+        });
+
+        new vpclattice.CfnListener(this, 'UnifiNetwork:LatticeListener', {
+            serviceIdentifier: unifiNetworkLatticeService.attrId,
+            protocol: 'HTTP',
+            port: 80,
+            defaultAction: {
+                forward: { targetGroups: [{ targetGroupIdentifier: unifiNetworkTargetGroup.attrId, weight: 100 }] }
+            }
+        });
+
+        new vpclattice.CfnServiceNetworkServiceAssociation(this, 'UnifiNetwork:LatticeServiceNetworkServiceAssociation', {
+            serviceNetworkIdentifier: serviceNetwork.attrId,
+            serviceIdentifier: unifiNetworkLatticeService.attrId
+        });
+
+        new route53.CnameRecord(this, 'UnifiNetwork:DnsRecord', {
+            zone: dnsPrivateZone,
+            recordName: 'unifi-network',
+            domainName: unifiNetworkLatticeService.attrDnsEntryDomainName
+        });
+
+        // --------------------------------
         // UniFi Site Manager MCP
         // --------------------------------
 

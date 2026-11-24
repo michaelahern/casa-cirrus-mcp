@@ -117,9 +117,7 @@ export class ModelContextProtocolServersStack extends cdk.Stack {
             essential: true,
             healthCheck: {
                 command: ['CMD', 'cloudflared', 'tunnel', 'ready'],
-                interval: cdk.Duration.seconds(10),
-                startPeriod: cdk.Duration.seconds(30),
-                timeout: cdk.Duration.seconds(5)
+                interval: cdk.Duration.seconds(10)
             },
             logging: ecs.LogDrivers.awsLogs({
                 streamPrefix: 'ecs',
@@ -174,6 +172,10 @@ export class ModelContextProtocolServersStack extends cdk.Stack {
                 UNIFI_NETWORK_PASSWORD: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(this, 'UnifiNetwork:Password', 'casa-cirrus-mcp/unifi/network-password'))
             },
             essential: true,
+            healthCheck: {
+                command: ['CMD', 'python', '-c', 'import socket; socket.create_connection(("127.0.0.1", 3000), 2)'],
+                interval: cdk.Duration.seconds(10)
+            },
             logging: ecs.LogDrivers.awsLogs({
                 streamPrefix: 'ecs',
                 logRetention: cdk.aws_logs.RetentionDays.ONE_MONTH,
@@ -202,7 +204,7 @@ export class ModelContextProtocolServersStack extends cdk.Stack {
                     protocol: 'HTTP',
                     protocolVersion: 'HTTP1',
                     matcher: {
-                        httpCode: '200,400,421'
+                        httpCode: '200,421' // 421: Lattice Health Check
                     }
                 }
             }
@@ -280,6 +282,10 @@ export class ModelContextProtocolServersStack extends cdk.Stack {
                 UNIFI_SITEMANAGER_API_KEY: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(this, 'UnifiSiteManager:ApiKey', 'casa-cirrus-mcp/unifi/sitemanager-api-key'))
             },
             essential: true,
+            healthCheck: {
+                command: ['CMD', 'python', '-c', 'import socket; socket.create_connection(("127.0.0.1", 3003), 2)'],
+                interval: cdk.Duration.seconds(10)
+            },
             logging: ecs.LogDrivers.awsLogs({
                 streamPrefix: 'ecs',
                 logRetention: cdk.aws_logs.RetentionDays.ONE_MONTH,
@@ -308,7 +314,7 @@ export class ModelContextProtocolServersStack extends cdk.Stack {
                     protocol: 'HTTP',
                     protocolVersion: 'HTTP1',
                     matcher: {
-                        httpCode: '200,400,421'
+                        httpCode: '200,421' // 421: Lattice Health Check
                     }
                 }
             }
